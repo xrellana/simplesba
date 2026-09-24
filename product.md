@@ -1,5 +1,101 @@
 # WoW simplesba 插件产品文档
 
+# 0. Review 结论（2026-09-24）
+
+> 本节记录对本文档的评审结论。其中部分结论与 §1、§4 的前提冲突，以本节为准。
+
+## 0.1 核心结论
+
+* 游戏内置的 Assisted Highlight 与 Single-Button Assistant 属于同一个 Assisted Combat 系统，推荐来源相同。
+* Assisted Highlight 只在 Action Bar 上高亮推荐技能，技能仍由玩家通过普通按键施放，**没有 GCD 惩罚**。因此 §1 中"避免 Single-Button Assistant 的 GCD penalty"已由游戏内置功能实现，不构成本插件的独特价值。
+* 展示层已有多个插件在维护并适配 12.x：NextGCD、JustAC、TrueShot、Simple Assisted Combat Icon，以及使用自有 rotation 逻辑的 MaxDps。
+* 所有基于 Assisted Combat 的插件，推荐质量上限都等于 Blizzard 推荐本身。插件只能改善呈现，不能改善推荐。
+
+结论：如果目标只是"自己玩输出更轻松"，优先使用 Assisted Highlight + 现有插件。只有当现有方案存在具体、明确的不满时，才把 simplesba 做成只解决这些问题的轻量个人插件。
+
+## 0.2 API 能力边界
+
+| API | 能力 | 限制 |
+|---|---|---|
+| `C_AssistedCombat.GetNextCastSpell([checkForVisibleButton])` | 返回当前推荐的一个 spellID | 只有一个；没有"排除某个技能"的参数 |
+| `C_AssistedCombat.GetRotationSpells()` | 返回当前专精 rotation 包含的 spellID 列表 | 文档未说明是否按优先级排序 |
+
+* "后续队列"（第 2、3 个技能）不是 Blizzard 提供的，只能由插件自行排序（JustAC 即如此）。
+* 推荐大 CD 时如果玩家不释放，按优先级模型推断，推荐会一直停在该 CD 上，期间没有普通技能推荐。需要实测确认。
+* 不同资料对推荐是否包含大 CD 说法不一，需要按专精实测。
+
+## 0.3 Midnight（12.0）限制
+
+* 战斗中冷却、Aura、资源等状态为 secret value：插件可以显示，但不能用于条件判断。
+* 12.0 新增 `Region:SetAlphaFromBoolean()`、`Region:SetVertexColorFromBoolean()` 等接口，可以用 secret 值直接驱动显示。能否借此实现"CD 就绪时亮绿圈"需要实验。
+* WeakAuras 不支持 Midnight 正式服。
+* 以下功能在正式服可能无法实现：§15 的 Resource / Target / Range 显示、§21–§24 中依赖战斗日志或战斗状态的分析、§16 / §22 依赖 GUID 的木桩识别。
+
+## 0.4 一键方案对比
+
+| 方案 | 按战斗状态判断 | 一个键 | 无 GCD 惩罚 |
+|---|---|---|---|
+| Single-Button Assistant / GSE + SBA | 是 | 是 | 否 |
+| GSE / 优先级宏 | 否 | 是 | 是 |
+| Assisted Highlight / simplesba | 是 | 否 | 是 |
+
+* 三项同时满足是 Blizzard secure 执行模型明确禁止的。任何插件（包括 GSE、WeakAuras）都不能在战斗中根据推荐结果选择 protected action。
+* GSE 合规，是因为它按点击次数推进固定序列，不读取战斗状态。
+* 依靠站外程序识别屏幕并模拟按键属于自动化，违反服务条款，不在本项目考虑范围内。
+* GCD 延长 25% 时，纯 GCD 技能的施放次数约降至 80%；自动攻击、DoT、宠物伤害不受影响，实际 DPS 损失小于 20%。
+
+## 0.5 可实现范围
+
+确定可做：
+
+* 屏幕中央 HUD：技能图标 + 键位；
+* Action Bar 高亮，颜色自定义；按推荐技能类型区分颜色（普通技能白色、CD 技能绿色），CD 判定使用静态表或基础冷却阈值；
+* 键位识别：宏、翻页、Bartender / Dominos；
+* 只在输出专精、战斗中显示。
+
+需要实验：
+
+* 推荐 CD 不释放时是否卡住；如果卡住，是否用 `GetRotationSpells()` + 轻量排序补一个普通技能推荐位（需放宽 §5.3）；
+* 用 secret 冷却驱动"CD 就绪即亮绿圈"，实现 MaxDps 式的白圈、绿圈同时显示；
+* 显示后续技能队列。
+
+不可做：
+
+* 一键执行 rotation 且无 GCD 惩罚；
+* 根据战斗状态自行计算推荐；
+* 依赖战斗日志的分析功能。
+
+## 0.6 本文档待修正问题
+
+* 键位映射（§8、§12、§13）缺少：技能替换（override spell）、宏（`GetMacroSpell`）、翻页与 bonus bar、第三方 Action Bar 的绑定命令、"Primary Binding"的定义、键位缩写格式。可以直接使用 `C_ActionBar.FindSpellActionButtons()`。
+* §11 事件列表缺少 `UPDATE_BINDINGS`、`ACTIONBAR_PAGE_CHANGED`、`UPDATE_BONUS_ACTIONBAR`、`UPDATE_SHAPESHIFT_FORM`、`PLAYER_SPECIALIZATION_CHANGED`、`TRAIT_CONFIG_UPDATED`、`SPELLS_CHANGED`。键位映射失效时也需要刷新 UI，不能只在 spellID 变化时刷新。已有轮询时，`UNIT_AURA`、`UNIT_POWER_UPDATE` 是冗余的。
+* 阶段划分冲突：§9 高亮、§10 HUD 设置、§16 Combat Only 在正文与 §31–§33 中的阶段不一致；§14、§17 未标阶段。
+* §29 SavedVariables 与功能不匹配：§16 的显示模式是四选一，`combatOnly` 布尔值无法表达；缺少绑定偏好、UNBOUND 颜色、锁定、尺寸、锚点、schema 版本；未说明按账号、角色还是专精存储。
+* §1 的 25% GCD 惩罚需注明来源和补丁版本。
+* 格式：大量单个词包在代码块里；HUD 示意图重复多次且布局不一致；§1 标题层级与其他章节不一致。
+
+## 0.7 下一步
+
+1. 游戏内验证：开启 Assisted Highlight，试用 NextGCD 或 JustAC；打木桩测试推荐 CD 不释放时是否卡住、大 CD 是否在推荐中，以及战斗中 `GetNextCastSpell()` 返回值是否可用。
+2. 根据结果决定：现有方案够用则搁置本项目；否则将本文档缩减为一页，只保留要解决的具体问题，删除第三、四阶段。
+
+## 0.8 参考资料
+
+* [Single-Button Assistant and Assisted Highlight Design Intentions - Icy Veins](https://www.icy-veins.com/wow/news/single-button-assistant-and-assisted-highlight-design-intentions/)
+* [C_AssistedCombat.GetNextCastSpell - Warcraft Wiki](https://warcraft.wiki.gg/wiki/API_C_AssistedCombat.GetNextCastSpell)
+* [C_AssistedCombat.GetRotationSpells - Warcraft Wiki](https://warcraft.wiki.gg/wiki/API_C_AssistedCombat.GetRotationSpells)
+* [Patch 12.0.0/API changes - Warcraft Wiki](https://warcraft.wiki.gg/wiki/Patch_12.0.0/API_changes)
+* [Combat Philosophy and Addon Disarmament in Midnight - Blizzard](https://news.blizzard.com/en-us/article/24246290/combat-philosophy-and-addon-disarmament-in-midnight)
+* [WeakAuras to End Support in Midnight - Icy Veins](https://www.icy-veins.com/wow/news/weakauras-to-end-support-in-midnight/)
+* [NextGCD - CurseForge](https://www.curseforge.com/wow/addons/nextgcd)
+* [JustAC - GitHub](https://github.com/wealdly/JustAC)
+* [TrueShot - GitHub](https://github.com/itsDNNS/TrueShot)
+* [MaxDps Rotation Helper - CurseForge](https://www.curseforge.com/wow/addons/maxdps-rotation-helper)
+* [GSE - CurseForge](https://www.curseforge.com/wow/addons/gse-gnome-sequencer-enhanced-advanced-macros)
+* [GSE + SBA All-in-One-Button BM for Midnight - WoW Lazy Macros](https://wowlazymacros.com/t/gse-sba-all-in-one-button-bm-packmaster-for-midnight-3-15-2026/60195)
+
+---
+
 ## 1. 产品背景
 
 World of Warcraft 正式服已经提供 Assisted Combat 系统，可以根据玩家当前职业、专精、资源、目标状态和战斗环境，给出当前推荐释放的下一个技能。
@@ -242,9 +338,25 @@ C_AssistedCombat.GetNextCastSpell()
 
 ---
 
+## 5.4 不支持坦克和治疗专精
+
+插件只面向输出专精（DPS）。
+
+当前专精为坦克或治疗时，插件不显示推荐、不高亮 Action Bar。
+
+判断方式：
+
+```lua
+GetSpecializationRole(GetSpecialization())
+```
+
+返回值不为 `DAMAGER` 时视为不支持。
+
+---
+
 # 6. 目标用户
 
-主要目标玩家：
+主要目标玩家：玩输出专精（DPS）的玩家。
 
 ### A. 不想完整学习 Rotation 的玩家
 
@@ -259,56 +371,7 @@ C_AssistedCombat.GetNextCastSpell()
 
 ---
 
-### B. 治疗职业
-
-尤其适合：
-
-* Holy Paladin
-* Discipline Priest
-* Holy Priest
-* Restoration Shaman
-* Restoration Druid
-* Mistweaver Monk
-* Preservation Evoker
-
-治疗技能仍然由玩家判断。
-
-输出技能则由 Assisted Combat 辅助。
-
-例如奶骑：
-
-```text
-治疗部分
-
-Holy Shock
-Word of Glory
-Flash of Light
-Beacon
-Cooldown
-Utility
-
-玩家自己处理
-```
-
-同时：
-
-```text
-输出部分
-
-Judgment
-Crusader Strike
-Hammer of Wrath
-Consecration
-其他输出技能
-
-由 Assisted Combat 推荐
-```
-
-这样可以降低治疗职业“补 DPS”的操作负担。
-
----
-
-### C. Alt 玩家
+### B. Alt 玩家
 
 玩家可能有大量小号。
 
@@ -683,6 +746,12 @@ Training Dummy Only
 不支持 Assisted Combat
 ```
 
+或者当前专精：
+
+```text
+是坦克或治疗专精
+```
+
 或者：
 
 ```text
@@ -700,50 +769,7 @@ No Recommendation
 
 ---
 
-# 18. 治疗职业模式
-
-这是插件比较有价值的使用场景。
-
-例如 Holy Paladin。
-
-插件只辅助：
-
-```text
-Damage Rotation
-```
-
-治疗继续由玩家自己处理。
-
-UI可以设置：
-
-```text
-Hide Recommendation
-While Mouseover Friendly Unit
-```
-
-或者：
-
-```text
-Only Show Damage Recommendations
-```
-
-最终操作模型：
-
-```text
-队友掉血
-
-→ Mouseover Heal
-
-血线稳定
-
-→ 看 HUD
-
-→ Q / E / R 输出
-```
-
----
-
-# 19. 可选模式：ActionBar Only
+# 18. 可选模式：ActionBar Only
 
 有些玩家不想看额外 HUD。
 
@@ -765,7 +791,7 @@ Judgment 按钮发光
 
 ---
 
-# 20. 可选模式：HUD Only
+# 19. 可选模式：HUD Only
 
 相反：
 
@@ -779,7 +805,7 @@ ActionBar Glow OFF
 
 ---
 
-# 21. 推荐技能历史
+# 20. 推荐技能历史
 
 后续版本可以增加 Debug 模式：
 
@@ -804,7 +830,7 @@ Combat State
 
 ---
 
-# 22. Rotation 分析模式
+# 21. Rotation 分析模式
 
 Debug 信息可以统计：
 
@@ -826,7 +852,7 @@ Consecration        11
 
 ---
 
-# 23. Training Dummy 模式
+# 22. Training Dummy 模式
 
 可以增加一个测试模式。
 
@@ -859,7 +885,7 @@ Target Count
 
 ---
 
-# 24. 潜在增强功能：推荐确认
+# 23. 潜在增强功能：推荐确认
 
 可以记录：
 
@@ -897,7 +923,7 @@ Follow Rate: 82%
 
 ---
 
-# 25. 潜在增强功能：Missed Recommendation
+# 24. 潜在增强功能：Missed Recommendation
 
 例如：
 
@@ -919,7 +945,7 @@ Skipped
 
 ---
 
-# 26. Potential Experimental Feature
+# 25. Potential Experimental Feature
 
 可以研究：
 
@@ -960,7 +986,7 @@ click target
 
 ---
 
-# 27. 为什么“一键无 penalty”不是 MVP
+# 26. 为什么“一键无 penalty”不是 MVP
 
 理想中的功能：
 
@@ -1019,7 +1045,7 @@ Dynamic Protected Execution
 
 ---
 
-# 28. 产品安全边界
+# 27. 产品安全边界
 
 插件正式版本应遵守以下原则：
 
@@ -1050,14 +1076,14 @@ Player Input
 
 ---
 
-# 29. 插件架构
+# 28. 插件架构
 
 建议模块：
 
 ```text
-AssistedCombatHelper/
+simplesba/
 │
-├── AssistedCombatHelper.toc
+├── simplesba.toc
 │
 ├── Core.lua
 │
@@ -1138,12 +1164,12 @@ ActionBar Highlight。
 
 ---
 
-# 30. SavedVariables
+# 29. SavedVariables
 
 建议：
 
 ```lua
-AssistedCombatHelperDB = {
+simplesbaDB = {
     enabled = true,
 
     hud = {
@@ -1173,12 +1199,12 @@ AssistedCombatHelperDB = {
 
 ---
 
-# 31. Slash Commands
+# 30. Slash Commands
 
 建议：
 
 ```text
-/ach
+/simplesba
 ```
 
 打开设置。
@@ -1186,16 +1212,16 @@ AssistedCombatHelperDB = {
 其他：
 
 ```text
-/ach lock
-/ach unlock
-/ach reset
-/ach debug
-/ach test
+/simplesba lock
+/simplesba unlock
+/simplesba reset
+/simplesba debug
+/simplesba test
 ```
 
 ---
 
-# 32. MVP 开发阶段
+# 31. MVP 开发阶段
 
 第一阶段只实现：
 
@@ -1215,7 +1241,7 @@ GetNextCastSpell
 
 ---
 
-# 33. 第二阶段
+# 32. 第二阶段
 
 增加：
 
@@ -1228,7 +1254,7 @@ Third-party ActionBar support
 
 ---
 
-# 34. 第三阶段
+# 33. 第三阶段
 
 增加：
 
@@ -1241,7 +1267,7 @@ Recommendation Follow Rate
 
 ---
 
-# 35. 第四阶段：Secure API Research
+# 34. 第四阶段：Secure API Research
 
 独立进行实验：
 
@@ -1273,7 +1299,7 @@ Attribute Changes
 
 ---
 
-# 36. 产品最终定位
+# 35. 产品最终定位
 
 插件不应该定位为：
 
@@ -1293,7 +1319,7 @@ Attribute Changes
 
 ---
 
-# 37. 最终体验目标
+# 36. 最终体验目标
 
 理想状态下，玩家进入战斗以后只需要关注一个很小的区域：
 
